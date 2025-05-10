@@ -5,11 +5,14 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QSplitter
-    QGridLayout, QFrame, QScrollArea
+    QGridLayout, QFrame, QScrollArea, QComboBox, QSpinBox, QGroupBox
 )
 from PyQt5.QtGui import QPixmap, QImage, QIcon
-from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
 from PIL import Image
+import json
+import os.path
+from functools import lru_cache
 from core.sorter import sort_images_by_blur
 from utils.image_loader import load_images_from_folder
 from core.face_filter import detect_face_attributes
@@ -35,6 +38,8 @@ class AilbumsApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Ailbums Culling App")
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".ailbums_cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
         self.setGeometry(200, 100, 1200, 750)
         self.setStyleSheet("""
             QWidget {
@@ -62,6 +67,12 @@ class AilbumsApp(QWidget):
         self.exported = 0
         self.image_status = {}
         self.image_scores = {}
+        self.thumbnail_cache = {}
+        self.filter_settings = {
+            "min_score": 5,
+            "sort_by": "score",
+            "show_rejected": True
+        }
 
         self.init_ui()
 
@@ -82,6 +93,25 @@ class AilbumsApp(QWidget):
         header_layout.addWidget(self.folder_btn)
         
         main_layout.addWidget(header)
+        # Add filter controls
+        filter_box = QGroupBox("Filters & Sorting")
+        filter_layout = QHBoxLayout()
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Score", "Blur", "Exposure"])
+        self.sort_combo.currentTextChanged.connect(self.apply_filters)
+        
+        self.min_score = QSpinBox()
+        self.min_score.setRange(0, 10)
+        self.min_score.setValue(5)
+        self.min_score.valueChanged.connect(self.apply_filters)
+        
+        filter_layout.addWidget(QLabel("Sort by:"))
+        filter_layout.addWidget(self.sort_combo)
+        filter_layout.addWidget(QLabel("Min score:"))
+        filter_layout.addWidget(self.min_score)
+        filter_box.setLayout(filter_layout)
+        main_layout.addWidget(filter_box)
 
         # Create grid for thumbnails
         scroll = QScrollArea()
@@ -116,6 +146,23 @@ class AilbumsApp(QWidget):
         self.log_box.setMaximumHeight(100)
 
         main_layout.addLayout(options)
+        
+        # Add export options
+        export_box = QGroupBox("Export Options")
+        export_layout = QHBoxLayout()
+        
+        self.export_threshold = QSpinBox()
+        self.export_threshold.setRange(0, 10)
+        self.export_threshold.setValue(7)
+        
+        export_btn = QPushButton("Export Selected")
+        export_btn.clicked.connect(self.export_selected)
+        
+        export_layout.addWidget(QLabel("Quality threshold:"))
+        export_layout.addWidget(self.export_threshold)
+        export_layout.addWidget(export_btn)
+        export_box.setLayout(export_layout)
+        main_layout.addWidget(export_box)
         main_layout.addWidget(self.start_btn)
         main_layout.addWidget(self.progress)
         layout.addWidget(self.log_box)
@@ -127,11 +174,85 @@ class AilbumsApp(QWidget):
     def select_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Select folder")
         if path:
+            self.clear_cache()
             self.folder_path = path
             self.folder_label.setText(f"📁 {path}")
             self.log_box.append(f"Loaded folder: {path}")
             self.load_images()
 
+    @lru_cache(maxsize=100)
+    def get_cached_thumbnail(self, filename):
+        cache_path = os.path.join(self.cache_dir, f"{filename}.json")
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r') as f:
+                return json.load(f)
+        return None
+
+    def save_to_cache(self, filename, data):
+        cache_path = os.path.join(self.cache_dir, f"{filename}.json")
+        with open(cache_path, 'w') as f:
+            json.dump(data, f)
+
+    def clear_cache(self):
+        for file in os.listdir(self.cache_dir):
+            os.remove(os.path.join(self.cache_dir, file))
+
+    def apply_filters(self):
+        sort_by = self.sort_combo.currentText().lower()
+        min_score = self.min_score.value()
+        
+        filtered_images = {}
+        for filename, scores in self.image_scores.items():
+            if scores["total"] >= min_score:
+                filtered_images[filename] = scores
+        
+        sorted_images = sorted(
+            filtered_images.items(),
+            key=lambda x: x[1][sort_by] if sort_by != "score" else x[1]["total"],
+            reverse=True
+        )
+        
+        self.update_grid(sorted_images)
+
+    def update_grid(self, sorted_images):
+        # Clear existing grid
+        for i in reversed(range(self.grid.count())): 
+            self.grid.itemAt(i).widget().setParent(None)
+        
+        # Add filtered and sorted images
+        row = 0
+        col = 0
+        for filename, scores in sorted_images:
+            thumb_widget = self.create_thumbnail_widget(filename, scores)
+            self.grid.addWidget(thumb_widget, row, col)
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
+
+    def create_thumbnail_widget(self, filename, scores):
+        widget = QFrame()
+        widget.setStyleSheet("background: white; border-radius: 8px; padding: 8px;")
+        layout = QVBoxLayout(widget)
+        
+        # Image thumbnail
+        img_label = QLabel()
+        pixmap = self.get_thumbnail(filename)
+        img_label.setPixmap(pixmap)
+        layout.addWidget(img_label)
+        
+        # Stats
+        stats = QLabel(f"""
+            Score: {scores['total']:.1f}
+            Blur: {scores['blur']:.0f}
+            Eyes: {'✓' if scores['face']['eyes_open'] else '✗'}
+            Smile: {'✓' if scores['face']['smiling'] else '✗'}
+            Exposure: {scores['exposure']['quality']}
+        """)
+        stats.setStyleSheet("font-size: 10px;")
+        layout.addWidget(stats)
+        
+        return widget
     def process_images(self):
         for i, (filename, img) in enumerate(self.images.items()):
             try:
@@ -275,6 +396,24 @@ class AilbumsApp(QWidget):
         win.resize(820, 600)
         win.show()
 
+    def export_selected(self):
+        threshold = self.export_threshold.value()
+        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory")
+        
+        if export_dir:
+            exported = 0
+            for filename, scores in self.image_scores.items():
+                if scores["total"] >= threshold:
+                    src = os.path.join(self.folder_path, filename)
+                    dst = os.path.join(export_dir, filename)
+                    shutil.copy2(src, dst)
+                    exported += 1
+            
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Exported {exported} images with score >= {threshold}"
+            )
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
