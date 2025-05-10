@@ -50,9 +50,18 @@ class AilbumsApp:
         self.thumb_map = {}
 
     def browse_folder(self):
-        path = filedialog.askdirectory()
+        path = filedialog.askdirectory(title="Select folder with images")
         if path:
+            image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
+            all_files = os.listdir(path)
+            image_files = [f for f in all_files if f.lower().endswith(image_extensions)]
+
+            if not image_files:
+                messagebox.showwarning("No Images Found", "This folder contains no supported image files.")
+                return
+
             self.folder_path.set(path)
+            messagebox.showinfo("Images Found", f"📸 Found {len(image_files)} image(s) in the folder.")
 
     def run_culling_thread(self):
         threading.Thread(target=self.run_culling).start()
