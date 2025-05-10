@@ -1,2 +1,7 @@
 opencv-python
+numpy
+face-recognition
+mediapipe
+Pillow
+imagehash
 
