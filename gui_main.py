@@ -4,7 +4,7 @@ import shutil
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QSplitter
+    QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QSplitter,
     QGridLayout, QFrame, QScrollArea, QComboBox, QSpinBox, QGroupBox
 )
 from PyQt5.QtGui import QPixmap, QImage, QIcon
