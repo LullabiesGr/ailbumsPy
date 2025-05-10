@@ -105,14 +105,26 @@ class AilbumsApp:
             img = images[filename]
 
             try:
-                if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
-                    attributes = detect_face_attributes(img)
-                    if self.apply_eyes_filter.get() and not attributes["eyes_open"]:
+                try:
+                    if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
+                        attributes = detect_face_attributes(img)
+
+                     if self.apply_eyes_filter.get() and not attributes.get("eyes_open", False):
+                          shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                           continue
+
+                     if self.apply_smile_filter.get() and not attributes.get("smiling", False):
                         shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                        continue
-                    if self.apply_smile_filter.get() and not attributes["smiling"]:
-                        shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                        continue
+                         continue
+
+                    except Exception as e:
+                       # If filters were ON but face detection failed — reject the photo
+                    if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
+                        self.output_box.insert(tk.END, f"⚠️ Face analysis failed on {filename}: {e}\n")
+                       shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                         continue
+                         # If filters are OFF, just let it pass
+
 
                 if self.apply_duplicate_filter.get():
                     img_hash = get_image_hash(img)
