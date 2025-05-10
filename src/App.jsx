@@ -10,6 +10,7 @@ function App() {
   const [processing, setProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
   const [results, setResults] = useState([])
+  const [error, setError] = useState(null)
   const [filters, setFilters] = useState({
     eyes: true,
     smile: true,
@@ -20,10 +21,12 @@ function App() {
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files)
     setImages(files)
+    setError(null) // Clear any previous errors
   }
 
   const startProcessing = async () => {
     setProcessing(true)
+    setError(null)
     const processedResults = []
     
     for (let i = 0; i < images.length; i++) {
@@ -44,7 +47,14 @@ function App() {
         
         setProgress(((i + 1) / images.length) * 100)
       } catch (error) {
-        console.error('Error processing image:', error)
+        console.error('Error processing image:', {
+          message: error.message,
+          status: error.response?.status,
+          data: error.response?.data
+        })
+        setError(`Failed to process image: ${error.message}. Please ensure the backend server is running.`)
+        setProcessing(false)
+        return
       }
     }
     
@@ -70,6 +80,12 @@ function App() {
             className="mb-4"
           />
           
+          {error && (
+            <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-4">
+              {error}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div>
               <h3 className="font-medium mb-2">Filters</h3>
