@@ -1,201 +1,173 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk, Toplevel
-from PIL import Image, ImageTk
-import threading
+import sys
 import os
+import shutil
+import numpy as np
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QScrollArea
+)
+from PyQt5.QtGui import QPixmap, QImage, QIcon
+from PyQt5.QtCore import Qt, QSize
+from PIL import Image
 from core.sorter import sort_images_by_blur
 from utils.image_loader import load_images_from_folder
 from core.face_filter import detect_face_attributes
 from core.face_cluster import get_face_embedding, get_image_hash, are_images_duplicates
-import shutil
-import numpy as np
 
-class AilbumsApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Ailbums Culling App")
-        self.root.geometry("800x680")
 
-        self.folder_path = tk.StringVar()
-        self.apply_smile_filter = tk.BooleanVar(value=True)
-        self.apply_eyes_filter = tk.BooleanVar(value=True)
-        self.apply_duplicate_filter = tk.BooleanVar(value=True)
-
-        top_frame = tk.Frame(root)
-        top_frame.pack(pady=5)
-
-        tk.Label(top_frame, text="Select image folder:").pack(side=tk.LEFT)
-        tk.Entry(top_frame, textvariable=self.folder_path, width=60).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="Browse", command=self.browse_folder).pack(side=tk.LEFT)
-
-        options_frame = tk.Frame(root)
-        options_frame.pack()
-
-        tk.Checkbutton(options_frame, text="Filter closed eyes", variable=self.apply_eyes_filter).pack(side=tk.LEFT, padx=10)
-        tk.Checkbutton(options_frame, text="Filter no smile", variable=self.apply_smile_filter).pack(side=tk.LEFT, padx=10)
-        tk.Checkbutton(options_frame, text="Filter duplicates", variable=self.apply_duplicate_filter).pack(side=tk.LEFT, padx=10)
-
-        tk.Button(root, text="Start Culling", command=self.run_culling_thread).pack(pady=5)
-
-        self.progress = ttk.Progressbar(root, orient="horizontal", length=600, mode="determinate")
-        self.progress.pack(pady=5)
-
-        self.output_box = scrolledtext.ScrolledText(root, height=8, width=95)
-        self.output_box.pack(pady=5)
-
-        self.thumbnail_canvas = tk.Canvas(root, width=760, height=200, bg="white")
-        self.thumbnail_canvas.pack(pady=10)
-        self.thumbnail_row_y = 10
+class AilbumsApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Ailbums Culling App")
+        self.setGeometry(200, 100, 1000, 700)
+        self.folder_path = ""
+        self.images = {}
         self.thumbnails = []
-        self.thumb_map = {}
+        self.known_embeddings = []
+        self.seen_hashes = []
+        self.exported = 0
 
-    def browse_folder(self):
-        path = filedialog.askdirectory(title="Select folder with images")
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        # Top bar
+        top_bar = QHBoxLayout()
+        self.folder_label = QLabel("Select image folder:")
+        self.folder_btn = QPushButton("Browse")
+        self.folder_btn.clicked.connect(self.select_folder)
+        top_bar.addWidget(self.folder_label)
+        top_bar.addWidget(self.folder_btn)
+
+        # Checkboxes
+        options = QHBoxLayout()
+        self.eyes_cb = QCheckBox("Filter closed eyes")
+        self.eyes_cb.setChecked(True)
+        self.smile_cb = QCheckBox("Filter no smile")
+        self.smile_cb.setChecked(True)
+        self.dup_cb = QCheckBox("Filter duplicates")
+        self.dup_cb.setChecked(True)
+        options.addWidget(self.eyes_cb)
+        options.addWidget(self.smile_cb)
+        options.addWidget(self.dup_cb)
+
+        # Start button
+        self.start_btn = QPushButton("Start Culling")
+        self.start_btn.clicked.connect(self.run_culling)
+
+        # Output box
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+
+        # Progress
+        self.progress = QProgressBar()
+
+        # Thumbnails
+        self.thumb_list = QListWidget()
+        self.thumb_list.setIconSize(QSize(100, 100))
+
+        layout.addLayout(top_bar)
+        layout.addLayout(options)
+        layout.addWidget(self.start_btn)
+        layout.addWidget(self.progress)
+        layout.addWidget(self.log_box)
+        layout.addWidget(QLabel("Approved Thumbnails:"))
+        layout.addWidget(self.thumb_list)
+
+        self.setLayout(layout)
+
+    def select_folder(self):
+        path = QFileDialog.getExistingDirectory(self, "Select folder")
         if path:
-            image_extensions = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
-            all_files = os.listdir(path)
-            image_files = [f for f in all_files if f.lower().endswith(image_extensions)]
-
-            if not image_files:
-                messagebox.showwarning("No Images Found", "This folder contains no supported image files.")
-                return
-
-            self.folder_path.set(path)
-            messagebox.showinfo("Images Found", f"📸 Found {len(image_files)} image(s) in the folder.")
-
-    def run_culling_thread(self):
-        threading.Thread(target=self.run_culling).start()
-
-    def show_full_image(self, img_array, filename):
-        top = Toplevel(self.root)
-        top.title(filename)
-        pil_img = Image.fromarray(img_array[:, :, ::-1])
-        img = ImageTk.PhotoImage(pil_img)
-        label = tk.Label(top, image=img)
-        label.image = img
-        label.pack()
+            self.folder_path = path
+            self.folder_label.setText(f"📁 {path}")
+            self.log_box.append(f"Loaded folder: {path}")
 
     def run_culling(self):
-        folder = self.folder_path.get()
-        if not os.path.isdir(folder):
-            messagebox.showerror("Error", "Please select a valid folder.")
+        if not self.folder_path:
+            QMessageBox.warning(self, "Error", "No folder selected.")
             return
 
-        self.output_box.delete("1.0", tk.END)
-        self.thumbnail_canvas.delete("all")
-        self.thumbnails.clear()
-        self.thumb_map.clear()
-        self.output_box.insert(tk.END, f"📂 Loading images from: {folder}\n")
-
-        images = load_images_from_folder(folder)
-        results = sort_images_by_blur(images)
-        sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
-
-        approved_folder = os.path.join(folder, "Approved")
-        rejected_folder = os.path.join(folder, "Rejected")
+        approved_folder = os.path.join(self.folder_path, "Approved")
+        rejected_folder = os.path.join(self.folder_path, "Rejected")
         os.makedirs(approved_folder, exist_ok=True)
         os.makedirs(rejected_folder, exist_ok=True)
 
-        export_count = 50
-        seen_hashes = []
-        known_embeddings = []
-        exported = 0
-        total = min(export_count, len(sorted_results))
-        self.progress["maximum"] = total
+        self.images = load_images_from_folder(self.folder_path)
+        sorted_results = sort_images_by_blur(self.images)
+        sorted_items = sorted(sorted_results.items(), key=lambda x: x[1], reverse=True)
 
-        x, y = 10, self.thumbnail_row_y
+        self.progress.setMaximum(min(50, len(sorted_items)))
+        self.exported = 0
 
-        for i, (filename, _) in enumerate(sorted_results):
-            if exported >= export_count:
+        for i, (filename, _) in enumerate(sorted_items):
+            if self.exported >= 50:
                 break
 
-            src_path = os.path.join(folder, filename)
-            img = images[filename]
+            src_path = os.path.join(self.folder_path, filename)
+            img = self.images[filename]
+            reject = False
 
             try:
-                reject = False
+                if self.smile_cb.isChecked() or self.eyes_cb.isChecked():
+                    attributes = detect_face_attributes(img)
+                    if self.eyes_cb.isChecked() and attributes.get("eyes_open") is False:
+                        self.log_box.append(f"❌ {filename}: eyes closed")
+                        reject = True
+                    if self.smile_cb.isChecked() and not attributes.get("smiling", False):
+                        self.log_box.append(f"❌ {filename}: not smiling")
+                        reject = True
 
-                if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
-                    try:
-                        attributes = detect_face_attributes(img)
-
-                        eyes_open = attributes.get("eyes_open")
-                        if self.apply_eyes_filter.get() and eyes_open is False:
-                            self.output_box.insert(tk.END, f"❌ {filename}: eyes closed (eyes_open={eyes_open})\n")
-                            reject = True
-
-                        if self.apply_smile_filter.get() and not attributes.get("smiling", False):
-                            self.output_box.insert(tk.END, f"❌ {filename}: not smiling\n")
-                            reject = True
-
-                    except Exception as e:
-                        self.output_box.insert(tk.END, f"⚠️ Face detection failed on {filename}: {e}\n")
-
-                if not reject and self.apply_duplicate_filter.get():
-                    try:
-                        img_hash = get_image_hash(img)
-                        if any(are_images_duplicates(img_hash, h) for h in seen_hashes):
-                            self.output_box.insert(tk.END, f"❌ {filename}: duplicate detected\n")
-                            reject = True
-                        else:
-                            seen_hashes.append(img_hash)
-                    except Exception as e:
-                        self.output_box.insert(tk.END, f"⚠️ Hashing failed on {filename}: {e}\n")
+                if not reject and self.dup_cb.isChecked():
+                    img_hash = get_image_hash(img)
+                    if any(are_images_duplicates(img_hash, h) for h in self.seen_hashes):
+                        self.log_box.append(f"❌ {filename}: duplicate detected")
+                        reject = True
+                    else:
+                        self.seen_hashes.append(img_hash)
 
                 if not reject:
-                    try:
-                        embedding = get_face_embedding(img)
-                        if embedding is not None:
-                            if any(np.linalg.norm(embedding - e) < 0.6 for e in known_embeddings):
-                                self.output_box.insert(tk.END, f"❌ {filename}: same person\n")
-                                reject = True
-                            else:
-                                known_embeddings.append(embedding)
-                    except Exception as e:
-                        self.output_box.insert(tk.END, f"⚠️ Embedding failed for {filename}: {e}\n")
+                    embedding = get_face_embedding(img)
+                    if embedding is not None:
+                        if any(np.linalg.norm(embedding - e) < 0.6 for e in self.known_embeddings):
+                            self.log_box.append(f"❌ {filename}: same person")
+                            reject = True
+                        else:
+                            self.known_embeddings.append(embedding)
 
-                if reject:
-                    shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                    continue
+                dest = rejected_folder if reject else approved_folder
+                shutil.copyfile(src_path, os.path.join(dest, filename))
 
-                shutil.copyfile(src_path, os.path.join(approved_folder, filename))
-                exported += 1
-                self.output_box.insert(tk.END, f"✅ {filename}\n")
-
-                pil_img = Image.fromarray(img[:, :, ::-1])
-                pil_img.thumbnail((100, 100))
-                thumb = ImageTk.PhotoImage(pil_img)
-                self.thumbnails.append(thumb)
-                img_id = self.thumbnail_canvas.create_image(x, y, anchor=tk.NW, image=thumb)
-                self.thumb_map[img_id] = (img, filename)
-                x += 110
-                if x > 700:
-                    x = 10
-                    y += 110
-
-                self.progress["value"] = exported
-                self.root.update_idletasks()
+                if not reject:
+                    self.exported += 1
+                    self.log_box.append(f"✅ {filename}")
+                    self.add_thumbnail(img, filename)
 
             except Exception as e:
-                self.output_box.insert(tk.END, f"❌ Unexpected error with {filename}: {e}\n")
-                shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                self.log_box.append(f"⚠️ {filename} failed: {e}")
 
-        self.output_box.insert(tk.END, f"\n🎉 {exported} photos exported to {approved_folder}\n")
-        self.thumbnail_canvas.bind("<Button-1>", self.on_thumbnail_click)
+            self.progress.setValue(self.exported)
 
-    def on_thumbnail_click(self, event):
-        x, y = event.x, event.y
-        for img_id in self.thumb_map:
-            coords = self.thumbnail_canvas.coords(img_id)
-            if coords and coords[0] <= x <= coords[0] + 100 and coords[1] <= y <= coords[1] + 100:
-                img, filename = self.thumb_map[img_id]
-                self.show_full_image(img, filename)
-                break
+        self.log_box.append(f"\n🎉 {self.exported} photos exported to {approved_folder}")
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = AilbumsApp(root)
-    root.mainloop()
+    def add_thumbnail(self, img, filename):
+        try:
+            pil_img = Image.fromarray(img[:, :, ::-1])
+            pil_img.thumbnail((100, 100))
+            qt_img = QImage(pil_img.tobytes(), pil_img.width, pil_img.height, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qt_img.rgbSwapped())
+            item = QListWidgetItem(QIcon(pixmap), filename)
+            self.thumb_list.addItem(item)
+        except Exception as e:
+            self.log_box.append(f"❌ Thumbnail failed for {filename}: {e}")
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = AilbumsApp()
+    window.show()
+    sys.exit(app.exec_())
 
 
 
