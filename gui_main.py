@@ -77,7 +77,7 @@ class AilbumsApp(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        main_layout = QVBoxLayout()
+        layout = QVBoxLayout()
         
         # Create modern header
         header = QFrame()
@@ -92,7 +92,7 @@ class AilbumsApp(QWidget):
         self.folder_btn.clicked.connect(self.select_folder)
         header_layout.addWidget(self.folder_btn)
         
-        main_layout.addWidget(header)
+        layout.addWidget(header)
         # Add filter controls
         filter_box = QGroupBox("Filters & Sorting")
         filter_layout = QHBoxLayout()
@@ -111,7 +111,7 @@ class AilbumsApp(QWidget):
         filter_layout.addWidget(QLabel("Min score:"))
         filter_layout.addWidget(self.min_score)
         filter_box.setLayout(filter_layout)
-        main_layout.addWidget(filter_box)
+        layout.addWidget(filter_box)
 
         # Create grid for thumbnails
         scroll = QScrollArea()
@@ -122,7 +122,7 @@ class AilbumsApp(QWidget):
         self.grid = QGridLayout(content)
         scroll.setWidget(content)
         
-        main_layout.addWidget(scroll)
+        layout.addWidget(scroll)
 
         options = QHBoxLayout()
         self.eyes_cb = QCheckBox("Filter closed eyes")
@@ -145,7 +145,7 @@ class AilbumsApp(QWidget):
         self.log_box.setReadOnly(True)
         self.log_box.setMaximumHeight(100)
 
-        main_layout.addLayout(options)
+        layout.addLayout(options)
         
         # Add export options
         export_box = QGroupBox("Export Options")
@@ -162,9 +162,9 @@ class AilbumsApp(QWidget):
         export_layout.addWidget(self.export_threshold)
         export_layout.addWidget(export_btn)
         export_box.setLayout(export_layout)
-        main_layout.addWidget(export_box)
-        main_layout.addWidget(self.start_btn)
-        main_layout.addWidget(self.progress)
+        layout.addWidget(export_box)
+        layout.addWidget(self.start_btn)
+        layout.addWidget(self.progress)
         layout.addWidget(self.log_box)
         layout.addWidget(QLabel("Approved & Rejected Thumbnails:"))
         layout.addWidget(self.thumb_list)
