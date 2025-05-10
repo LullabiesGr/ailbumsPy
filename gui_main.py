@@ -113,6 +113,7 @@ class AilbumsApp:
             img = images[filename]
 
             try:
+                # Face filters
                 if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
                     try:
                         attributes = detect_face_attributes(img)
@@ -127,6 +128,7 @@ class AilbumsApp:
                         shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
                         continue
 
+                # Duplicate filter
                 if self.apply_duplicate_filter.get():
                     img_hash = get_image_hash(img)
                     if any(are_images_duplicates(img_hash, h) for h in seen_hashes):
@@ -134,13 +136,20 @@ class AilbumsApp:
                         continue
                     seen_hashes.append(img_hash)
 
-                embedding = get_face_embedding(img)
-                if embedding is not None:
-                    if any(np.linalg.norm(embedding - e) < 0.6 for e in known_embeddings):
-                        shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                        continue
-                    known_embeddings.append(embedding)
+                # Face clustering (safe)
+                try:
+                    embedding = get_face_embedding(img)
+                    if embedding is not None:
+                        if any(np.linalg.norm(embedding - e) < 0.6 for e in known_embeddings):
+                            shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                            continue
+                        known_embeddings.append(embedding)
+                except Exception as e:
+                    self.output_box.insert(tk.END, f"⚠️ Embedding failed for {filename}: {e}\n")
+                    shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                    continue
 
+                # Export and show
                 shutil.copyfile(src_path, os.path.join(approved_folder, filename))
                 exported += 1
                 self.output_box.insert(tk.END, f"✅ {filename}\n")
