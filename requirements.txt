@@ -6,6 +6,4 @@ Pillow
 imagehash
 PyQt5
 qtmodern
-numpy
 scipy
-
