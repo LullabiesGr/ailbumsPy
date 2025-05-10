@@ -61,7 +61,7 @@ class AilbumsApp:
                 return
 
             self.folder_path.set(path)
-            messagebox.showinfo("Images Found", f"\U0001F4F8 Found {len(image_files)} image(s) in the folder.")
+            messagebox.showinfo("Images Found", f"📸 Found {len(image_files)} image(s) in the folder.")
 
     def run_culling_thread(self):
         threading.Thread(target=self.run_culling).start()
@@ -85,7 +85,7 @@ class AilbumsApp:
         self.thumbnail_canvas.delete("all")
         self.thumbnails.clear()
         self.thumb_map.clear()
-        self.output_box.insert(tk.END, f"\U0001F4C2 Loading images from: {folder}\n")
+        self.output_box.insert(tk.END, f"📂 Loading images from: {folder}\n")
 
         images = load_images_from_folder(folder)
         results = sort_images_by_blur(images)
@@ -115,43 +115,44 @@ class AilbumsApp:
             try:
                 reject = False
 
-                # Face filters
                 if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
                     try:
                         attributes = detect_face_attributes(img)
-                        if self.apply_eyes_filter.get() and not attributes.get("eyes_open", False):
-                            self.output_box.insert(tk.END, f"\u274C {filename}: eyes closed\n")
-                            reject = True
-                        if self.apply_smile_filter.get() and not attributes.get("smiling", False):
-                            self.output_box.insert(tk.END, f"\u274C {filename}: not smiling\n")
-                            reject = True
-                    except Exception as e:
-                        self.output_box.insert(tk.END, f"\u26A0\uFE0F Face detection failed on {filename}: {e}\n")
 
-                # Duplicate filter
+                        eyes_open = attributes.get("eyes_open")
+                        if self.apply_eyes_filter.get() and eyes_open is False:
+                            self.output_box.insert(tk.END, f"❌ {filename}: eyes closed (eyes_open={eyes_open})\n")
+                            reject = True
+
+                        if self.apply_smile_filter.get() and not attributes.get("smiling", False):
+                            self.output_box.insert(tk.END, f"❌ {filename}: not smiling\n")
+                            reject = True
+
+                    except Exception as e:
+                        self.output_box.insert(tk.END, f"⚠️ Face detection failed on {filename}: {e}\n")
+
                 if not reject and self.apply_duplicate_filter.get():
                     try:
                         img_hash = get_image_hash(img)
                         if any(are_images_duplicates(img_hash, h) for h in seen_hashes):
-                            self.output_box.insert(tk.END, f"\u274C {filename}: duplicate detected\n")
+                            self.output_box.insert(tk.END, f"❌ {filename}: duplicate detected\n")
                             reject = True
                         else:
                             seen_hashes.append(img_hash)
                     except Exception as e:
-                        self.output_box.insert(tk.END, f"\u26A0\uFE0F Hashing failed on {filename}: {e}\n")
+                        self.output_box.insert(tk.END, f"⚠️ Hashing failed on {filename}: {e}\n")
 
-                # Face clustering
                 if not reject:
                     try:
                         embedding = get_face_embedding(img)
                         if embedding is not None:
                             if any(np.linalg.norm(embedding - e) < 0.6 for e in known_embeddings):
-                                self.output_box.insert(tk.END, f"\u274C {filename}: same person\n")
+                                self.output_box.insert(tk.END, f"❌ {filename}: same person\n")
                                 reject = True
                             else:
                                 known_embeddings.append(embedding)
                     except Exception as e:
-                        self.output_box.insert(tk.END, f"\u26A0\uFE0F Embedding failed for {filename}: {e}\n")
+                        self.output_box.insert(tk.END, f"⚠️ Embedding failed for {filename}: {e}\n")
 
                 if reject:
                     shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
@@ -159,7 +160,7 @@ class AilbumsApp:
 
                 shutil.copyfile(src_path, os.path.join(approved_folder, filename))
                 exported += 1
-                self.output_box.insert(tk.END, f"\u2705 {filename}\n")
+                self.output_box.insert(tk.END, f"✅ {filename}\n")
 
                 pil_img = Image.fromarray(img[:, :, ::-1])
                 pil_img.thumbnail((100, 100))
@@ -176,10 +177,10 @@ class AilbumsApp:
                 self.root.update_idletasks()
 
             except Exception as e:
-                self.output_box.insert(tk.END, f"\u274C Unexpected error with {filename}: {e}\n")
+                self.output_box.insert(tk.END, f"❌ Unexpected error with {filename}: {e}\n")
                 shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
 
-        self.output_box.insert(tk.END, f"\n\U0001F389 {exported} photos exported to {approved_folder}\n")
+        self.output_box.insert(tk.END, f"\n🎉 {exported} photos exported to {approved_folder}\n")
         self.thumbnail_canvas.bind("<Button-1>", self.on_thumbnail_click)
 
     def on_thumbnail_click(self, event):
@@ -195,6 +196,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = AilbumsApp(root)
     root.mainloop()
+
 
 
 
