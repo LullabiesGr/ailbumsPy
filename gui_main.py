@@ -21,7 +21,6 @@ class AilbumsApp:
         self.apply_eyes_filter = tk.BooleanVar(value=True)
         self.apply_duplicate_filter = tk.BooleanVar(value=True)
 
-        # --- UI Layout ---
         top_frame = tk.Frame(root)
         top_frame.pack(pady=5)
 
@@ -64,7 +63,7 @@ class AilbumsApp:
         pil_img = Image.fromarray(img_array[:, :, ::-1])
         img = ImageTk.PhotoImage(pil_img)
         label = tk.Label(top, image=img)
-        label.image = img  # keep ref
+        label.image = img
         label.pack()
 
     def run_culling(self):
@@ -105,26 +104,19 @@ class AilbumsApp:
             img = images[filename]
 
             try:
-                try:
-                    if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
+                if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
+                    try:
                         attributes = detect_face_attributes(img)
-
-                     if self.apply_eyes_filter.get() and not attributes.get("eyes_open", False):
-                          shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                           continue
-
-                     if self.apply_smile_filter.get() and not attributes.get("smiling", False):
-                        shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                         continue
-
+                        if self.apply_eyes_filter.get() and not attributes.get("eyes_open", False):
+                            shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                            continue
+                        if self.apply_smile_filter.get() and not attributes.get("smiling", False):
+                            shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                            continue
                     except Exception as e:
-                       # If filters were ON but face detection failed — reject the photo
-                    if self.apply_smile_filter.get() or self.apply_eyes_filter.get():
                         self.output_box.insert(tk.END, f"⚠️ Face analysis failed on {filename}: {e}\n")
-                       shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
-                         continue
-                         # If filters are OFF, just let it pass
-
+                        shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
+                        continue
 
                 if self.apply_duplicate_filter.get():
                     img_hash = get_image_hash(img)
@@ -144,7 +136,6 @@ class AilbumsApp:
                 exported += 1
                 self.output_box.insert(tk.END, f"✅ {filename}\n")
 
-                # Thumbnail
                 pil_img = Image.fromarray(img[:, :, ::-1])
                 pil_img.thumbnail((100, 100))
                 thumb = ImageTk.PhotoImage(pil_img)
@@ -164,7 +155,6 @@ class AilbumsApp:
                 shutil.copyfile(src_path, os.path.join(rejected_folder, filename))
 
         self.output_box.insert(tk.END, f"\n🎉 {exported} photos exported to {approved_folder}\n")
-
         self.thumbnail_canvas.bind("<Button-1>", self.on_thumbnail_click)
 
     def on_thumbnail_click(self, event):
@@ -176,9 +166,9 @@ class AilbumsApp:
                 self.show_full_image(img, filename)
                 break
 
-# Run the app
 if __name__ == "__main__":
     root = tk.Tk()
     app = AilbumsApp(root)
     root.mainloop()
+
 
