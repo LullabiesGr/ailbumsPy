@@ -4,7 +4,7 @@ import shutil
 import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QScrollArea
+    QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox
 )
 from PyQt5.QtGui import QPixmap, QImage, QIcon
 from PyQt5.QtCore import Qt, QSize
@@ -32,7 +32,6 @@ class AilbumsApp(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
 
-        # Top bar
         top_bar = QHBoxLayout()
         self.folder_label = QLabel("Select image folder:")
         self.folder_btn = QPushButton("Browse")
@@ -40,7 +39,6 @@ class AilbumsApp(QWidget):
         top_bar.addWidget(self.folder_label)
         top_bar.addWidget(self.folder_btn)
 
-        # Checkboxes
         options = QHBoxLayout()
         self.eyes_cb = QCheckBox("Filter closed eyes")
         self.eyes_cb.setChecked(True)
@@ -52,18 +50,14 @@ class AilbumsApp(QWidget):
         options.addWidget(self.smile_cb)
         options.addWidget(self.dup_cb)
 
-        # Start button
         self.start_btn = QPushButton("Start Culling")
         self.start_btn.clicked.connect(self.run_culling)
 
-        # Output box
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
 
-        # Progress
         self.progress = QProgressBar()
 
-        # Thumbnails
         self.thumb_list = QListWidget()
         self.thumb_list.setIconSize(QSize(100, 100))
 
@@ -100,6 +94,8 @@ class AilbumsApp(QWidget):
 
         self.progress.setMaximum(min(50, len(sorted_items)))
         self.exported = 0
+        self.known_embeddings = []
+        self.seen_hashes = []
 
         for i, (filename, _) in enumerate(sorted_items):
             if self.exported >= 50:
@@ -108,33 +104,48 @@ class AilbumsApp(QWidget):
             src_path = os.path.join(self.folder_path, filename)
             img = self.images[filename]
             reject = False
+            reason = []
 
             try:
+                # Face filters
+                attributes = None
                 if self.smile_cb.isChecked() or self.eyes_cb.isChecked():
-                    attributes = detect_face_attributes(img)
-                    if self.eyes_cb.isChecked() and attributes.get("eyes_open") is False:
-                        self.log_box.append(f"❌ {filename}: eyes closed")
-                        reject = True
-                    if self.smile_cb.isChecked() and not attributes.get("smiling", False):
-                        self.log_box.append(f"❌ {filename}: not smiling")
-                        reject = True
+                    try:
+                        attributes = detect_face_attributes(img)
+                    except Exception:
+                        reason.append("no face detected")
 
+                if attributes:
+                    if self.eyes_cb.isChecked():
+                        if attributes.get("eyes_open") is False:
+                            reason.append("eyes closed")
+                            reject = True
+                    if self.smile_cb.isChecked():
+                        if attributes.get("smiling") is False:
+                            reason.append("not smiling")
+                            reject = True
+
+                # Duplicate filter
                 if not reject and self.dup_cb.isChecked():
                     img_hash = get_image_hash(img)
                     if any(are_images_duplicates(img_hash, h) for h in self.seen_hashes):
-                        self.log_box.append(f"❌ {filename}: duplicate detected")
+                        reason.append("duplicate detected")
                         reject = True
                     else:
                         self.seen_hashes.append(img_hash)
 
+                # Face embedding cluster filter
                 if not reject:
-                    embedding = get_face_embedding(img)
-                    if embedding is not None:
-                        if any(np.linalg.norm(embedding - e) < 0.6 for e in self.known_embeddings):
-                            self.log_box.append(f"❌ {filename}: same person")
-                            reject = True
-                        else:
-                            self.known_embeddings.append(embedding)
+                    try:
+                        embedding = get_face_embedding(img)
+                        if embedding is not None:
+                            if any(np.linalg.norm(embedding - e) < 0.6 for e in self.known_embeddings):
+                                reason.append("similar face")
+                                reject = True
+                            else:
+                                self.known_embeddings.append(embedding)
+                    except Exception:
+                        reason.append("embedding failed")
 
                 dest = rejected_folder if reject else approved_folder
                 shutil.copyfile(src_path, os.path.join(dest, filename))
@@ -142,7 +153,10 @@ class AilbumsApp(QWidget):
                 if not reject:
                     self.exported += 1
                     self.log_box.append(f"✅ {filename}")
-                    self.add_thumbnail(img, filename)
+                else:
+                    self.log_box.append(f"❌ {filename}: {'; '.join(reason)}")
+
+                self.add_thumbnail(img, filename)
 
             except Exception as e:
                 self.log_box.append(f"⚠️ {filename} failed: {e}")
