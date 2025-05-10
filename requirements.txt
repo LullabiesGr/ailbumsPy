@@ -4,4 +4,8 @@ face-recognition
 mediapipe
 Pillow
 imagehash
+PyQt5
+qtmodern
+numpy
+scipy
 

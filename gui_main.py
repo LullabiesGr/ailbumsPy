@@ -5,14 +5,30 @@ import numpy as np
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QCheckBox, QTextEdit, QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QSplitter
+    QGridLayout, QFrame, QScrollArea
 )
 from PyQt5.QtGui import QPixmap, QImage, QIcon
-from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize, QThread, pyqtSignal
 from PIL import Image
 from core.sorter import sort_images_by_blur
 from utils.image_loader import load_images_from_folder
 from core.face_filter import detect_face_attributes
 from core.face_cluster import get_face_embedding, get_image_hash, are_images_duplicates
+from core.analyzer import analyze_exposure, calculate_image_score
+import qtmodern.styles
+import qtmodern.windows
+
+class ProcessingThread(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal()
+    log = pyqtSignal(str)
+    
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        
+    def run(self):
+        self.app.process_images()
 
 
 class AilbumsApp(QWidget):
@@ -20,24 +36,63 @@ class AilbumsApp(QWidget):
         super().__init__()
         self.setWindowTitle("Ailbums Culling App")
         self.setGeometry(200, 100, 1200, 750)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f5f5f5;
+            }
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+        """)
         self.folder_path = ""
         self.images = {}
         self.known_embeddings = []
         self.seen_hashes = []
         self.exported = 0
         self.image_status = {}
+        self.image_scores = {}
 
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout()
-
-        top_bar = QHBoxLayout()
-        self.folder_label = QLabel("📁 Select image folder")
-        self.folder_btn = QPushButton("Browse")
+        main_layout = QVBoxLayout()
+        
+        # Create modern header
+        header = QFrame()
+        header.setStyleSheet("background-color: white; border-radius: 8px;")
+        header_layout = QHBoxLayout(header)
+        
+        title = QLabel("Ailbums")
+        title.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976D2;")
+        header_layout.addWidget(title)
+        
+        self.folder_btn = QPushButton("Select Folder")
         self.folder_btn.clicked.connect(self.select_folder)
-        top_bar.addWidget(self.folder_label)
-        top_bar.addWidget(self.folder_btn)
+        header_layout.addWidget(self.folder_btn)
+        
+        main_layout.addWidget(header)
+
+        # Create grid for thumbnails
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content = QWidget()
+        self.grid = QGridLayout(content)
+        scroll.setWidget(content)
+        
+        main_layout.addWidget(scroll)
 
         options = QHBoxLayout()
         self.eyes_cb = QCheckBox("Filter closed eyes")
@@ -50,6 +105,7 @@ class AilbumsApp(QWidget):
         options.addWidget(self.smile_cb)
         options.addWidget(self.dup_cb)
 
+        self.processing_thread = ProcessingThread(self)
         self.start_btn = QPushButton("Start Culling")
         self.start_btn.clicked.connect(self.run_culling)
 
@@ -57,15 +113,11 @@ class AilbumsApp(QWidget):
 
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
+        self.log_box.setMaximumHeight(100)
 
-        self.thumb_list = QListWidget()
-        self.thumb_list.setIconSize(QSize(140, 140))
-        self.thumb_list.itemClicked.connect(self.preview_full_image)
-
-        layout.addLayout(top_bar)
-        layout.addLayout(options)
-        layout.addWidget(self.start_btn)
-        layout.addWidget(self.progress)
+        main_layout.addLayout(options)
+        main_layout.addWidget(self.start_btn)
+        main_layout.addWidget(self.progress)
         layout.addWidget(self.log_box)
         layout.addWidget(QLabel("Approved & Rejected Thumbnails:"))
         layout.addWidget(self.thumb_list)
@@ -80,6 +132,29 @@ class AilbumsApp(QWidget):
             self.log_box.append(f"Loaded folder: {path}")
             self.load_images()
 
+    def process_images(self):
+        for i, (filename, img) in enumerate(self.images.items()):
+            try:
+                # Calculate all scores
+                blur_score = sort_images_by_blur({filename: img})[filename]
+                face_attrs = detect_face_attributes(img)
+                exposure_data = analyze_exposure(img)
+                
+                # Calculate final score
+                final_score = calculate_image_score(blur_score, face_attrs, exposure_data)
+                
+                self.image_scores[filename] = {
+                    "total": final_score,
+                    "blur": blur_score,
+                    "face": face_attrs,
+                    "exposure": exposure_data
+                }
+                
+                self.processing_thread.progress.emit(i + 1)
+                
+            except Exception as e:
+                self.processing_thread.log.emit(f"Error processing {filename}: {str(e)}")
+
     def load_images(self):
         self.thumb_list.clear()
         self.images = load_images_from_folder(self.folder_path)
@@ -87,11 +162,7 @@ class AilbumsApp(QWidget):
             self.add_thumbnail(img, filename, "Pending")
 
     def run_culling(self):
-        if not self.folder_path:
-            QMessageBox.warning(self, "Error", "No folder selected.")
-            return
-
-        approved_folder = os.path.join(self.folder_path, "Approved")
+        self.processing_thread.start()
         rejected_folder = os.path.join(self.folder_path, "Rejected")
         os.makedirs(approved_folder, exist_ok=True)
         os.makedirs(rejected_folder, exist_ok=True)

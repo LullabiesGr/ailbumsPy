@@ -6,6 +6,7 @@ from core.sorter import sort_images_by_blur
 from utils.image_loader import load_images_from_folder
 from core.face_filter import detect_face_attributes
 from core.face_cluster import get_face_embedding, get_image_hash, are_images_duplicates
+from core.analyzer import analyze_exposure, calculate_image_score
 
 def main():
     folder = input("Enter path to image folder: ")
@@ -35,8 +36,16 @@ def main():
     exported = 0
     seen_hashes = []
     known_embeddings = []
+    
+    # Process images in batches
+    batch_size = 10
+    for i in range(0, len(sorted_results), batch_size):
+        batch = sorted_results[i:i + batch_size]
+        
+        for filename, _ in batch:
+            if exported >= export_count:
+                break
 
-    for filename, _ in sorted_results:
         if exported >= export_count:
             break
 
